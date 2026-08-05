@@ -1,0 +1,113 @@
+# syntax=docker/dockerfile:1
+
+ARG WINDOWS_IMAGE="ghcr.io/dockur/windows:latest"
+ARG QEMU_REF="fbf3304d7c9a50889b340726ecfadaf2ffb6ca05"
+ARG VIRGL_REF="986b5fc57b07c06b5e0b3a3694d06898ebc80163"
+
+FROM ${WINDOWS_IMAGE} AS builder
+
+ARG QEMU_REF
+ARG VIRGL_REF
+
+RUN apt-get update && apt-get install --no-install-recommends -y \
+      build-essential \
+      bison \
+      ca-certificates \
+      flex \
+      git \
+      libaio-dev \
+      libcap-ng-dev \
+      libdrm-dev \
+      libepoxy-dev \
+      libfdt-dev \
+      libgbm-dev \
+      libglib2.0-dev \
+      libgnutls28-dev \
+      libjpeg-dev \
+      libpixman-1-dev \
+      libpng-dev \
+      libseccomp-dev \
+      libslirp-dev \
+      liburing-dev \
+      libusb-1.0-0-dev \
+      libusbredirparser-dev \
+      libvulkan-dev \
+      libzstd-dev \
+      meson \
+      ninja-build \
+      pkgconf \
+      python3-yaml \
+      python3-venv \
+      zlib1g-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN git init /src/virglrenderer \
+    && git -C /src/virglrenderer remote add origin https://gitlab.freedesktop.org/virgl/virglrenderer.git \
+    && git -C /src/virglrenderer fetch --depth=1 origin "$VIRGL_REF" \
+    && git -C /src/virglrenderer checkout --detach FETCH_HEAD
+COPY patches/virglrenderer-device-memory-budget.patch /tmp/
+RUN git -C /src/virglrenderer apply /tmp/virglrenderer-device-memory-budget.patch \
+    && meson setup /src/virglrenderer/build /src/virglrenderer \
+      --prefix=/opt/helios \
+      --libdir=lib \
+      --buildtype=release \
+      -Dplatforms=egl \
+      -Dvenus=true \
+      -Drender-server-worker=thread \
+      -Dunstable-apis=true \
+      -Dtests=false \
+      -Dvideo=false \
+    && meson compile -C /src/virglrenderer/build \
+    && meson install -C /src/virglrenderer/build
+
+RUN git init /src/qemu-helios \
+    && git -C /src/qemu-helios remote add origin https://github.com/rupansh/qemu-helios.git \
+    && git -C /src/qemu-helios fetch --depth=1 origin "$QEMU_REF" \
+    && git -C /src/qemu-helios checkout --detach FETCH_HEAD \
+    && git -C /src/qemu-helios submodule update --init --depth=1 third_party/Vulkan-Headers
+RUN cd /src/qemu-helios \
+    && PKG_CONFIG_PATH=/opt/helios/lib/pkgconfig ./configure \
+      --prefix=/opt/helios \
+      --target-list=x86_64-softmmu \
+      --enable-kvm \
+      --enable-opengl \
+      --enable-virglrenderer \
+      --enable-vnc \
+      --disable-docs \
+      --disable-gtk \
+      --disable-libnfs \
+      --disable-modules \
+      --disable-sdl \
+      --disable-spice \
+      --disable-werror \
+    && ninja -C build \
+    && ninja -C build install \
+    && strip /opt/helios/bin/qemu-system-x86_64 /opt/helios/libexec/virgl_render_server
+
+FROM ${WINDOWS_IMAGE}
+
+ARG QEMU_REF
+ARG VIRGL_REF
+
+RUN apt-get update \
+    && apt-get install --no-install-recommends -y \
+      libegl1 \
+      libgl1 \
+      libvulkan1 \
+      mesa-vulkan-drivers \
+      qemu-system-modules-opengl \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /opt/helios /opt/helios
+COPY --chmod=755 src/entry.sh src/display.sh /run/
+
+ENV QEMU_BIN="/opt/helios/bin/qemu-system-x86_64" \
+    LD_LIBRARY_PATH="/opt/helios/lib" \
+    RENDER_SERVER_EXEC_PATH="/opt/helios/libexec/virgl_render_server" \
+    VKR_DEVICE_MEMORY_LIMIT_BYTES="4294967296" \
+    override_vram_size="4096"
+
+LABEL org.opencontainers.image.title="Windows with Helios GPU acceleration" \
+      org.opencontainers.image.source="https://github.com/winboat-org/helios-windows" \
+      io.helios.qemu.commit="$QEMU_REF" \
+      io.helios.virglrenderer.commit="$VIRGL_REF"

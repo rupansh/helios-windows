@@ -5,6 +5,7 @@ set -Eeuo pipefail
 : "${PLATFORM:="x64"}"
 : "${BOOT_MODE:="windows"}"
 : "${SUPPORT:="https://github.com/dockur/windows"}"
+: "${QEMU_BIN:="qemu-system-x86_64"}"
 
 cd /run
 
@@ -32,7 +33,7 @@ cd /run
 
 trap - ERR
 
-cmd=(qemu-system-x86_64)
+cmd=("$QEMU_BIN")
 version=$("${cmd[@]}" --version | awk 'NR==1 { print $4 }')
 info "Booting ${APP}${BOOT_DESC} using QEMU v$version..." && echo
 
