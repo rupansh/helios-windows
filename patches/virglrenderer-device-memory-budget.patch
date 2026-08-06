@@ -1,8 +1,8 @@
 diff --git a/src/venus/vkr_device_memory.c b/src/venus/vkr_device_memory.c
-index ffe621bc..18d038dc 100644
+index ffe621b..b09e3bc 100644
 --- a/src/venus/vkr_device_memory.c
 +++ b/src/venus/vkr_device_memory.c
-@@ -10,6 +10,92 @@
+@@ -10,6 +10,117 @@
  #include "vkr_device_memory_gen.h"
  #include "vkr_physical_device.h"
 
@@ -46,6 +46,31 @@ index ffe621bc..18d038dc 100644
 +
 +   atomic_store_explicit(&vkr_device_memory_budget_used, 0, memory_order_relaxed);
 +   vkr_device_memory_budget_limit = 0;
++}
++
++void
++vkr_device_memory_budget_clamp_properties(
++   VkPhysicalDeviceMemoryProperties *properties,
++   VkPhysicalDeviceMemoryBudgetPropertiesEXT *budget_properties)
++{
++   uint64_t remaining = vkr_device_memory_budget_limit;
++   if (!remaining)
++      return;
++
++   for (uint32_t i = 0; i < properties->memoryHeapCount; i++) {
++      VkMemoryHeap *heap = &properties->memoryHeaps[i];
++      if (!(heap->flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT))
++         continue;
++
++      heap->size = MIN2(heap->size, remaining);
++      remaining -= heap->size;
++      if (budget_properties) {
++         budget_properties->heapBudget[i] =
++            MIN2(budget_properties->heapBudget[i], heap->size);
++         budget_properties->heapUsage[i] =
++            MIN2(budget_properties->heapUsage[i], heap->size);
++      }
++   }
 +}
 +
 +static bool
@@ -95,7 +120,7 @@ index ffe621bc..18d038dc 100644
  static bool
  vkr_get_fd_info_from_resource_info(struct vkr_context *ctx,
                                     const VkImportMemoryResourceInfoMESA *res_info,
-@@ -119,7 +205,7 @@ fail:
+@@ -119,7 +230,7 @@ fail:
     return VK_ERROR_OUT_OF_DEVICE_MEMORY;
  }
 
@@ -104,7 +129,7 @@ index ffe621bc..18d038dc 100644
 
  static inline VkResult
  vkr_udmabuf_get_fd_info_from_allocation_info(
-@@ -365,10 +451,27 @@ vkr_dispatch_vkAllocateMemory(struct vn_dispatch_context *dispatch,
+@@ -365,10 +476,27 @@ vkr_dispatch_vkAllocateMemory(struct vn_dispatch_context *dispatch,
           valid_fd_types |= 1 << VIRGL_RESOURCE_FD_DMABUF;
     }
 
@@ -132,7 +157,7 @@ index ffe621bc..18d038dc 100644
        if (gbm_bo)
           vkr_gbm_bo_destroy(gbm_bo);
        return;
-@@ -382,6 +485,7 @@ vkr_dispatch_vkAllocateMemory(struct vn_dispatch_context *dispatch,
+@@ -382,6 +510,7 @@ vkr_dispatch_vkAllocateMemory(struct vn_dispatch_context *dispatch,
     mem->gbm_bo = gbm_bo;
     mem->allocation_size = alloc_info->allocationSize;
     mem->memory_type_index = mem_type_index;
@@ -140,7 +165,7 @@ index ffe621bc..18d038dc 100644
  }
 
  static void
-@@ -393,8 +497,15 @@ vkr_dispatch_vkFreeMemory(struct vn_dispatch_context *dispatch,
+@@ -393,8 +522,15 @@ vkr_dispatch_vkFreeMemory(struct vn_dispatch_context *dispatch,
     if (!mem)
        return;
 
@@ -156,7 +181,7 @@ index ffe621bc..18d038dc 100644
  }
 
  static void
-@@ -492,6 +603,8 @@ vkr_device_memory_release(struct vkr_device_memory *mem)
+@@ -492,6 +628,8 @@ vkr_device_memory_release(struct vkr_device_memory *mem)
        vkr_gbm_bo_destroy(mem->gbm_bo);
     if (mem->udmabuf_fd >= 0)
        close(mem->udmabuf_fd);
@@ -166,7 +191,7 @@ index ffe621bc..18d038dc 100644
 
  bool
 diff --git a/src/venus/vkr_device_memory.h b/src/venus/vkr_device_memory.h
-index 6e4e12e7..6e371829 100644
+index 6e4e12e..4f57934 100644
 --- a/src/venus/vkr_device_memory.h
 +++ b/src/venus/vkr_device_memory.h
 @@ -28,6 +28,7 @@ struct vkr_device_memory {
@@ -177,7 +202,7 @@ index 6e4e12e7..6e371829 100644
 
     bool exported;
  };
-@@ -36,6 +37,12 @@ VKR_DEFINE_OBJECT_CAST(device_memory, VK_OBJECT_TYPE_DEVICE_MEMORY, VkDeviceMemo
+@@ -36,6 +37,17 @@ VKR_DEFINE_OBJECT_CAST(device_memory, VK_OBJECT_TYPE_DEVICE_MEMORY, VkDeviceMemo
  void
  vkr_context_init_device_memory_dispatch(struct vkr_context *ctx);
 
@@ -187,11 +212,48 @@ index 6e4e12e7..6e371829 100644
 +void
 +vkr_device_memory_budget_fini(void);
 +
++void
++vkr_device_memory_budget_clamp_properties(
++   VkPhysicalDeviceMemoryProperties *properties,
++   VkPhysicalDeviceMemoryBudgetPropertiesEXT *budget_properties);
++
  void
  vkr_device_memory_release(struct vkr_device_memory *mem);
 
+diff --git a/src/venus/vkr_physical_device.c b/src/venus/vkr_physical_device.c
+index da41c9b..842491b 100644
+--- a/src/venus/vkr_physical_device.c
++++ b/src/venus/vkr_physical_device.c
+@@ -9,6 +9,7 @@
+
+ #include "vkr_context.h"
+ #include "vkr_device.h"
++#include "vkr_device_memory.h"
+ #include "vkr_instance.h"
+
+ #ifdef HAVE_LINUX_UDMABUF_H
+@@ -170,6 +171,7 @@ vkr_physical_device_init_memory_properties(struct vkr_physical_device *physical_
+
+    VkPhysicalDevice handle = physical_dev->base.handle.physical_device;
+    vk->GetPhysicalDeviceMemoryProperties(handle, &physical_dev->memory_properties);
++   vkr_device_memory_budget_clamp_properties(&physical_dev->memory_properties, NULL);
+
+    /* XXX When a VkMemoryType has VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, we
+     * assume any VkDeviceMemory with the memory type can be made external and
+@@ -686,6 +688,11 @@ vkr_dispatch_vkGetPhysicalDeviceMemoryProperties2(
+       vn_replace_vkGetPhysicalDeviceMemoryProperties2_args_handle(args);
+       vk->GetPhysicalDeviceMemoryProperties2(args->physicalDevice,
+                                              args->pMemoryProperties);
++      VkPhysicalDeviceMemoryBudgetPropertiesEXT *budget_properties =
++         vkr_find_struct(args->pMemoryProperties->pNext,
++                         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT);
++      vkr_device_memory_budget_clamp_properties(
++         &args->pMemoryProperties->memoryProperties, budget_properties);
+    }
+ }
+
 diff --git a/src/venus/vkr_renderer.c b/src/venus/vkr_renderer.c
-index c43a96e6..127da966 100644
+index c43a96e..127da96 100644
 --- a/src/venus/vkr_renderer.c
 +++ b/src/venus/vkr_renderer.c
 @@ -5,11 +5,13 @@
