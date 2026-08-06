@@ -35,6 +35,7 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
       libzstd-dev \
       meson \
       ninja-build \
+      patch \
       pkgconf \
       python3-yaml \
       python3-venv \
@@ -84,6 +85,12 @@ RUN cd /src/qemu-helios \
     && ninja -C build install \
     && strip /opt/helios/bin/qemu-system-x86_64 /opt/helios/libexec/virgl_render_server
 
+# qemux/qemu 7.40 selects KVM through both -machine and -enable-kvm. Helios
+# replaces those aliases with one accelerator object so QEMU can honor the
+# guest PAT without specifying incompatible accelerators.
+COPY patches/qemux-honor-guest-pat.patch /tmp/
+RUN patch -d / -p1 < /tmp/qemux-honor-guest-pat.patch
+
 FROM ${WINDOWS_IMAGE}
 
 ARG QEMU_REF
@@ -99,6 +106,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /opt/helios /opt/helios
+COPY --from=builder --chmod=755 /run/proc.sh /run/proc.sh
 COPY --chmod=755 src/display.sh /run/display.sh
 RUN ln -s /opt/helios/bin/qemu-system-x86_64 /usr/local/bin/qemu-system-x86_64
 

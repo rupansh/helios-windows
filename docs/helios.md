@@ -20,8 +20,44 @@ devices:
   - /dev/dri/renderD128
 ```
 
+Hosts using NVIDIA's proprietary driver must install and configure NVIDIA
+Container Toolkit for Docker. Request the exact GPU backing the render node and
+enable the toolkit's Vulkan/OpenGL libraries in the same service:
+
+```yaml
+environment:
+  NVIDIA_DRIVER_CAPABILITIES: graphics
+  __NV_PRIME_RENDER_OFFLOAD: "1"
+  __EGL_VENDOR_LIBRARY_FILENAMES: /usr/share/glvnd/egl_vendor.d/10_nvidia.json
+  __GLX_VENDOR_LIBRARY_NAME: nvidia
+  __VK_LAYER_NV_optimus: NVIDIA_only
+  VK_ICD_FILENAMES: /etc/vulkan/icd.d/nvidia_icd.json
+  GBM_BACKEND: nvidia-drm
+  GBM_BACKENDS_PATH: /usr/lib/gbm:/usr/lib/x86_64-linux-gnu/gbm
+deploy:
+  resources:
+    reservations:
+      devices:
+        - driver: nvidia
+          device_ids: [GPU-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx]
+          capabilities: [gpu]
+```
+
+Use the UUID reported by `nvidia-smi --query-gpu=uuid --format=csv,noheader`.
+Passing only `/dev/dri/renderD*` is not enough for the proprietary driver because
+the container also needs its matching userspace graphics libraries.
+WinBoat accepts either a registered `nvidia` runtime or an NVIDIA CDI spec that
+names the selected UUID; use `nvidia-ctk cdi list` to inspect CDI devices.
+The NVIDIA environment keeps QEMU's GBM, EGL, GLX, and Vulkan providers on the
+same driver. `GBM_BACKENDS_PATH` includes both the toolkit's common injection
+directory and Debian's native GBM directory.
+
 Set `HELIOS_BOOTSTRAP=Y` while installing the Windows driver to keep a standard
 VGA device available. Set it back to `N` after the driver-restart checkpoint.
+
+When Helios is enabled with KVM, the image starts QEMU with
+`-accel kvm,honor-guest-pat=on`; the qemux `-machine ...,accel=kvm` form is
+replaced rather than combined with it.
 
 The image is based on the current upstream Dockur image. QEMU and
 virglrenderer are pinned in `Dockerfile.helios` so a rebuild uses the tested
