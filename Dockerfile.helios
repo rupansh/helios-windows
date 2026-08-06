@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-ARG WINDOWS_IMAGE="ghcr.io/dockur/windows:latest"
+ARG WINDOWS_IMAGE="ghcr.io/dockur/windows:6.03"
 ARG QEMU_REF="d4fde50ccb5ec51a635003fda441d0ea4bbb2818"
 ARG VIRGL_REF="986b5fc57b07c06b5e0b3a3694d06898ebc80163"
 
