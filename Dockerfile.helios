@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 ARG WINDOWS_IMAGE="ghcr.io/dockur/windows:latest"
-ARG QEMU_REF="fbf3304d7c9a50889b340726ecfadaf2ffb6ca05"
+ARG QEMU_REF="d4fde50ccb5ec51a635003fda441d0ea4bbb2818"
 ARG VIRGL_REF="986b5fc57b07c06b5e0b3a3694d06898ebc80163"
 
 FROM ${WINDOWS_IMAGE} AS builder
