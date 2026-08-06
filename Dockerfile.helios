@@ -99,10 +99,10 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /opt/helios /opt/helios
-COPY --chmod=755 src/entry.sh src/display.sh /run/
+COPY --chmod=755 src/display.sh /run/display.sh
+RUN ln -s /opt/helios/bin/qemu-system-x86_64 /usr/local/bin/qemu-system-x86_64
 
-ENV QEMU_BIN="/opt/helios/bin/qemu-system-x86_64" \
-    LD_LIBRARY_PATH="/opt/helios/lib" \
+ENV LD_LIBRARY_PATH="/opt/helios/lib" \
     RENDER_SERVER_EXEC_PATH="/opt/helios/libexec/virgl_render_server" \
     VKR_DEVICE_MEMORY_LIMIT_BYTES="4294967296" \
     override_vram_size="4096"
