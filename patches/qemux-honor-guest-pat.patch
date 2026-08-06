@@ -1,0 +1,10 @@
+--- a/run/proc.sh
++++ b/run/proc.sh
+@@ -65 +65,6 @@ configureKvmCpuModel() {
+-  KVM_OPTS=",accel=kvm -enable-kvm -global kvm-pit.lost_tick_policy=discard"
++  if enabled "${HELIOS:-N}"; then
++    KVM_OPTS=" -accel kvm,honor-guest-pat=on"
++    KVM_OPTS+=" -global kvm-pit.lost_tick_policy=discard"
++  else
++    KVM_OPTS=",accel=kvm -enable-kvm -global kvm-pit.lost_tick_policy=discard"
++  fi
